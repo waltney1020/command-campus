@@ -1,0 +1,6 @@
+SUPABASE_KEYS.local.txt
+cc-connect.js
+cc-ping.config.json
+*.local.txt
+.env
+.env.*
