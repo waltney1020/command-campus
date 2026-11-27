@@ -8,6 +8,13 @@
   var filter = localStorage.getItem('cc_filter') || 'all';
   var lastSig = '';
   var usageTimer = null;
+  var THEMES = { current: 'Current', clean: 'Clean Pro', campus: 'Campus Map' };
+  var TORDER = ['current', 'clean', 'campus'];
+  var selClean = null;
+  function theme() { var t = null; try { t = localStorage.getItem('cc_theme'); } catch (e) {} return THEMES[t] ? t : 'current'; }
+  function applyTheme() { document.documentElement.setAttribute('data-theme', theme()); }
+  function setTheme(t) { if (!THEMES[t]) t = 'current'; try { localStorage.setItem('cc_theme', t); } catch (e) {} applyTheme(); render(true); }
+  applyTheme();
 
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function rel(ms) {
@@ -27,6 +34,7 @@
     return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
   }
   function openCount(id) { return store.notes(id).filter(function (n) { return !n.done; }).length; }
+  function currentId() { return route() || (theme() === 'clean' ? cleanSel() : null); }
   function route() { var m = location.hash.match(/^#\/p\/(.+)$/); return m ? decodeURIComponent(m[1]) : null; }
   function badge(p, cls) { return '<img class="badge ' + (cls || '') + '" src="assets/badge_' + esc(p) + '.png" alt="' + esc(PLAT[p] || p) + '" title="' + esc(PLAT[p] || p) + '">'; }
   function syncPill() {
@@ -37,6 +45,7 @@
     return '<span class="sync ok">● Synced across devices' + (pend ? ' (saving…)' : '') + '</span>';
   }
   function disp(p) { return store.display(p); }
+  function themeBtn() { return '<button class="btn ghost thm" data-theme-cycle title="Switch theme">◐ <span>' + esc(THEMES[theme()]) + '</span></button>'; }
   function usagePct(u) {
     var used = String(u.used || '').trim(), lim = String(u.limit || '').trim();
     if (/%\s*$/.test(used)) return Math.min(100, Math.max(0, parseFloat(used) || 0));
@@ -89,7 +98,7 @@
     }).join('');
     return '<header class="top"><div class="brand"><span class="logo">C</span><h1>Command Campus</h1></div>' +
       '<div class="pills"><span class="pill g"><i></i>' + c.working + ' Working</span><span class="pill r"><i></i>' + c.idle + ' Idle</span><span class="pill a"><i></i>' + c.needs + ' Need you</span></div>' +
-      '<div class="tools"><button class="btn" data-add>+ Add</button><button class="btn ghost" data-settings>⚙ Settings</button></div></header>' +
+      '<div class="tools"><button class="btn" data-add>+ Add</button>' + themeBtn() + '<button class="btn ghost" data-settings>⚙ Settings</button></div></header>' +
       '<div class="filters">' + chips + '</div>' +
       '<main class="grid">' + (cards || '<p class="empty">No cards here. Tap + Add.</p>') + '</main>' +
       usageHTML() +
@@ -120,6 +129,7 @@
       '<button class="auto-tog' + (p.status_mode === 'auto' ? ' on' : '') + '" data-auto="' + esc(p.id) + '">' + (p.status_mode === 'auto' ? 'Auto' : 'Manual') + '</button>' +
       badge(p.platform, 'tiny') +
       '<span class="grow"></span>' + syncPill() +
+      themeBtn() +
       '<button class="btn ghost" data-connect="' + esc(p.id) + '">Connect</button>' +
       '<button class="btn ghost" data-edit="' + esc(p.id) + '">✎ Edit</button></header>' +
       '<div class="split"><aside class="agents"><h2>' + (ag.length ? 'Agents' : 'Agent') + '</h2>' + agents + '</aside>' +
@@ -128,12 +138,110 @@
       '<button type="button" class="btn ghost" data-paste>Paste</button><button type="submit" class="btn send">Send</button></form></section></div>';
   }
 
+  /* ---------- theme: Clean Pro ---------- */
+  function counts(all) { var c = { working: 0, idle: 0, needs: 0 }; all.forEach(function (p) { var s = disp(p).status; c[s] = (c[s] || 0) + 1; }); return c; }
+  function pillsHTML(c) { return '<span class="pill g"><i></i>' + c.working + ' Working</span><span class="pill r"><i></i>' + c.idle + ' Idle</span><span class="pill a"><i></i>' + c.needs + ' Need you</span>'; }
+  function chipsHTML() {
+    return ['all', 'codex', 'grok', 'claude'].map(function (f) {
+      return '<button class="chip' + (filter === f ? ' on' : '') + '" data-filter="' + f + '">' + (f === 'all' ? 'All' : badge(f, 'tiny') + PLAT[f]) + '</button>';
+    }).join('');
+  }
+  function usageStrip(cls) {
+    return '<button type="button" class="' + cls + '" data-usage-open title="Open usage details">' +
+      '<span class="ul">Usage</span>' + store.usageList.map(function (u) {
+        var pct = usagePct(u);
+        return '<span class="ub"><b>' + esc(PLAT[u.platform] || u.platform) + '</b><span class="bar ' + barTone(pct) + '"><i style="width:' + pct + '%"></i></span><em>' + Math.round(pct) + '%</em></span>';
+      }).join('') + '</button>';
+  }
+  function cleanSel() {
+    var all = store.projects;
+    if (selClean && store.project(selClean)) return selClean;
+    var shown = all.filter(function (p) { return filter === 'all' || p.platform === filter; });
+    return (shown[0] || all[0] || {}).id || null;
+  }
+  function cleanHTML() {
+    var all = store.projects, c = counts(all), rid = route();
+    if (rid) selClean = rid;
+    var sel = cleanSel(), p = sel && store.project(sel);
+    var shown = all.filter(function (x) { return filter === 'all' || x.platform === filter; });
+    var items = shown.map(function (x) {
+      var d = disp(x);
+      return '<div class="cp-item s-' + d.status + (x.id === sel ? ' sel' : '') + '" data-open="' + esc(x.id) + '" role="button" tabindex="0">' +
+        '<img class="cp-av" src="assets/av_' + esc(x.avatar || 'golden') + '.jpg" alt="">' +
+        '<div class="cp-nm"><b>' + esc(x.name) + '</b><button class="cps s-' + d.status + '" data-cycle="' + esc(x.id) + '" title="Tap to change status"><i></i>' + STATUS[d.status] + '</button></div>' +
+        '<div class="cp-pl">' + badge(x.platform, 'cpb') + '<span class="ptag p-' + esc(x.platform) + '">' + esc(PLAT[x.platform] || x.platform) + '</span>' +
+        (openCount(x.id) ? '<span class="cnt" title="Open notes">' + openCount(x.id) + '</span>' : '') + '</div></div>';
+    }).join('') || '<p class="empty">No agents here.</p>';
+    var thread = '<p class="empty">Add a card to start a notes thread.</p>';
+    if (p) {
+      var d = disp(p), ag = p.agents || [];
+      thread = '<div class="cp-thead"><button class="btn ghost cp-back" data-back title="Back to list">‹</button>' +
+        '<img class="cp-av" src="assets/av_' + esc(p.avatar || 'golden') + '.jpg" alt=""><h2>' + esc(p.name) + '</h2>' +
+        '<button class="status s-' + d.status + '" data-cycle="' + esc(p.id) + '"><i></i>' + STATUS[d.status] + '</button>' +
+        '<button class="auto-tog' + (p.status_mode === 'auto' ? ' on' : '') + '" data-auto="' + esc(p.id) + '">' + (p.status_mode === 'auto' ? 'Auto' : 'Manual') + '</button>' +
+        badge(p.platform, 'tiny') + '<span class="grow"></span>' +
+        '<button class="btn ghost" data-connect="' + esc(p.id) + '">Connect</button><button class="btn ghost" data-edit="' + esc(p.id) + '">✎ Edit</button></div>' +
+        (ag.length ? '<div class="cp-ag">' + ag.map(function (a, i) { return '<button class="status sm s-' + a.status + '" data-agent="' + i + '"><i></i>' + esc(a.name) + ' · ' + STATUS[a.status] + '</button>'; }).join('') + '</div>' : '') +
+        '<div class="thread" id="thread">' + threadHTML(p) + '</div>' +
+        '<form class="composer" id="composer"><textarea id="msg" rows="1" placeholder="Paste agent update…"></textarea>' +
+        '<button type="button" class="btn ghost" data-paste>Paste</button><button type="submit" class="btn send">Send</button></form>';
+    }
+    return '<header class="cp-top"><div class="brand"><span class="logo">C</span><h1>Command Campus</h1></div>' +
+      '<div class="cp-chips">' + chipsHTML() + '</div><div class="pills">' + pillsHTML(c) + '</div>' +
+      '<div class="tools"><button class="btn" data-add>+ Add</button>' + themeBtn() + '<button class="btn ghost" data-settings title="Settings">⚙<span class="lbl"> Settings</span></button></div></header>' +
+      usageStrip('cp-usage') +
+      '<div class="cp' + (rid ? ' open' : '') + '"><aside class="cp-list">' + items + '</aside><section class="cp-main notes">' + thread + '</section></div>' +
+      '<footer class="foot">' + syncPill() + '</footer>';
+  }
+
+  /* ---------- theme: Campus Map ---------- */
+  var SPOTS = [[35.5, 34], [52.5, 37], [76, 41], [18, 47], [29, 62], [46, 74], [84, 64], [68, 82]];
+  var BSTAT = { working: 'g', idle: 'r', needs: 'a' };
+  function bIndex(p) {
+    var m = String(p.id).match(/(\d+)$/); if (m) return (+m[1]) % 4;
+    var h = 0, i; for (i = 0; i < p.id.length; i++) h = (h * 31 + p.id.charCodeAt(i)) >>> 0; return h % 4;
+  }
+  function bImg(p, st) { return 'assets/bld_' + 'abcd'.charAt(bIndex(p)) + '_' + BSTAT[st] + '.webp'; }
+  function dimmed(p) { return !(filter === 'all' || p.platform === filter); }
+  function tileHTML(p) {
+    var d = disp(p), n = openCount(p.id);
+    return '<article class="cm-tile s-' + d.status + (dimmed(p) ? ' dim' : '') + '" data-open="' + esc(p.id) + '">' +
+      '<img class="bimg" src="' + bImg(p, d.status) + '" alt="">' +
+      '<div class="tn">' + badge(p.platform, 'tiny') + '<b>' + esc(p.name) + '</b>' + (n ? '<span class="cnt">' + n + '</span>' : '') + '</div>' +
+      '<div class="statrow"><button class="status sm s-' + d.status + '" data-cycle="' + esc(p.id) + '"><i></i>' + STATUS[d.status] + '</button>' +
+      (p.status_mode === 'auto' ? '<span class="auto-tog on">Auto</span>' : '') + '</div></article>';
+  }
+  function campusHTML() {
+    var all = store.projects, c = counts(all);
+    var onMap = all.slice(0, SPOTS.length), extra = all.slice(SPOTS.length);
+    var bds = onMap.map(function (p, i) {
+      var d = disp(p), n = openCount(p.id), sp = SPOTS[i];
+      return '<div class="bd b-' + 'abcd'.charAt(bIndex(p)) + ' s-' + d.status + (dimmed(p) ? ' dim' : '') + '" data-open="' + esc(p.id) + '" style="left:' + sp[0] + '%;top:' + sp[1] + '%;z-index:' + Math.round(sp[1]) + '" title="' + esc(p.name) + ' · ' + STATUS[d.status] + '">' +
+        '<span class="glow"></span><img src="' + bImg(p, d.status) + '" alt="">' +
+        '<div class="bl">' + badge(p.platform, 'tiny') + '<b>' + esc(p.name) + '</b>' +
+        '<button class="bdot s-' + d.status + '" data-cycle="' + esc(p.id) + '" title="' + STATUS[d.status] + ' (tap to change)"><i></i></button>' +
+        (n ? '<span class="cnt" title="Open notes">' + n + '</span>' : '') + '</div></div>';
+    }).join('');
+    return '<div class="cm"><div class="cm-stage"><img class="cm-bgimg" src="assets/campus_bg.jpg" alt="">' +
+      '<header class="cm-top"><div class="cm-l"><div class="brand"><h1>Command Campus</h1></div><div class="cm-chips">' + chipsHTML() + '</div></div>' +
+      '<div class="cm-r"><div class="pills">' + pillsHTML(c) + '</div><div class="tools"><button class="btn" data-add>+ Add</button>' + themeBtn() + '<button class="btn ghost" data-settings title="Settings">⚙<span class="lbl"> Settings</span></button></div></div></header>' +
+      '<div class="cm-bds">' + bds + '</div>' + usageStrip('cm-usage') +
+      '<main class="cm-grid">' + (all.map(tileHTML).join('') || '<p class="empty">No cards. Tap + Add.</p>') + '</main>' +
+      '<footer class="cm-foot">' + syncPill() + '</footer></div>' +
+      (extra.length ? '<section class="cm-annex"><h3>Annex · ' + extra.length + ' more</h3><div class="annex-row">' + extra.map(tileHTML).join('') + '</div></section>' : '') + '</div>';
+  }
+  function usageModal() {
+    $modal.innerHTML = '<div class="sheet wide">' + usageHTML() + '<div class="actions"><span class="grow"></span><button type="button" class="btn send" data-cancel>Close</button></div></div>';
+    $modal.classList.remove('hidden');
+    $modal.onclick = function (e) { if (e.target === $modal || e.target.closest('[data-cancel]')) closeModal(); };
+  }
+
   /* ---------- render ---------- */
   function render(force) {
     var ae = document.activeElement;
     if (!force && ae && ae.closest && ae.closest('.ucard, .sheet')) return;
     var id = route(), p = id && store.project(id);
-    var sig = JSON.stringify([id, filter, store.projects, id ? store.notes(id) : 0, store.usageList, store.heartbeats(), store.info.mode, store.info.ok, store.pending(),
+    var th0 = theme(); var sig = JSON.stringify([th0, selClean, id, filter, store.projects, id ? store.notes(id) : 0, store.usageList, store.heartbeats(), store.info.mode, store.info.ok, store.pending(),
       store.projects.map(function (x) { return disp(x); })]);
     sig += Math.floor(Date.now() / 60000);
     if (!force && sig === lastSig) return; lastSig = sig;
@@ -141,9 +249,10 @@
     var th = document.getElementById('thread'), atBottom = !th || th.scrollHeight - th.scrollTop - th.clientHeight < 80;
     var prevTop = th ? th.scrollTop : 0;
     if (id && !p) { location.hash = '#/'; return; }
-    $app.className = p ? 'view-detail' : 'view-board';
-    $app.innerHTML = p ? detailHTML(p) : boardHTML();
-    if (p) {
+    var hasThread = !!p || th0 === 'clean';
+    $app.className = (th0 === 'clean' ? 'view-clean' : p ? 'view-detail' : th0 === 'campus' ? 'view-campus' : 'view-board') + (th0 === 'clean' && id ? ' cl-open' : '') + ' t-' + th0;
+    $app.innerHTML = th0 === 'clean' ? cleanHTML() : p ? detailHTML(p) : th0 === 'campus' ? campusHTML() : boardHTML();
+    if (hasThread) {
       var m = document.getElementById('msg'); if (m) { m.value = draft; autosize(m); if (hadFocus) m.focus(); }
       var t = document.getElementById('thread');
       if (t) { if (force || atBottom || !th) t.scrollTop = t.scrollHeight; else t.scrollTop = prevTop; }
@@ -232,7 +341,9 @@
   }
   function settingsModal() {
     var c = store.getConfig();
-    $modal.innerHTML = '<div class="sheet"><h2>Settings: sync</h2><p class="hint">Without these, notes stay on this device only. To share between PC, laptop and phone, paste your Supabase Project URL and anon key, or import the keys file from your connect pack.</p>' +
+    var thm = '<h2>Settings</h2><h3 class="sethead">Theme</h3><p class="hint">Saved on this device only. Your data is the same in every theme.</p><div class="themes">' +
+      TORDER.map(function (k) { return '<button type="button" class="thm-opt' + (theme() === k ? ' on' : '') + '" data-theme-set="' + k + '"><img src="assets/theme_' + k + '.jpg" alt=""><span>' + THEMES[k] + '</span></button>'; }).join('') + '</div><h3 class="sethead">Sync</h3>';
+    $modal.innerHTML = '<div class="sheet">' + thm + '<p class="hint">Without these, notes stay on this device only. To share between PC, laptop and phone, paste your Supabase Project URL and anon key, or import the keys file from your connect pack.</p>' +
       '<form id="setform"><label>Supabase URL<input name="url" placeholder="https://xxxx.supabase.co" value="' + esc(c.url) + '"></label>' +
       '<label>Supabase anon key<input name="key" placeholder="eyJ..." value="' + esc(c.key) + '"></label>' +
       '<label class="import">Import connection file <input type="file" id="importkeys" accept=".txt,.json,.js,.local"></label>' +
@@ -275,7 +386,7 @@
   }
   function saveUsageCard(card) { store.saveUsage(readUsageCard(card)); }
   function sendNote() {
-    var id = route(), m = document.getElementById('msg'), text = m.value.replace(/\s+$/, '');
+    var id = currentId(), m = document.getElementById('msg'), text = m.value.replace(/\s+$/, '');
     if (!text.trim()) return;
     m.value = ''; autosize(m);
     store.saveNote({ id: store.uid(), project_id: id, text: text, created_at: Date.now(), done: false, done_at: null });
@@ -301,9 +412,16 @@
       p.status_mode = 'manual';
       store.saveProject(p); return;
     }
+    if ((el = t.closest('[data-theme-cycle]'))) { e.stopPropagation(); return setTheme(TORDER[(TORDER.indexOf(theme()) + 1) % TORDER.length]); }
+    if ((el = t.closest('[data-theme-set]'))) {
+      setTheme(el.dataset.themeSet);
+      [].forEach.call($modal.querySelectorAll('[data-theme-set]'), function (b) { b.classList.toggle('on', b.dataset.themeSet === theme()); });
+      return;
+    }
+    if (t.closest('[data-usage-open]')) return usageModal();
     if ((el = t.closest('[data-auto]'))) { e.stopPropagation(); return toggleAuto(el.dataset.auto); }
     if ((el = t.closest('[data-connect]'))) { e.stopPropagation(); return connectModal(el.dataset.connect); }
-    if ((el = t.closest('[data-agent]'))) { var pr = store.project(route()), a = pr.agents[+el.dataset.agent]; a.status = ORDER[(ORDER.indexOf(a.status) + 1) % 3]; store.saveProject(Object.assign({}, pr)); return; }
+    if ((el = t.closest('[data-agent]'))) { var pr = store.project(currentId()), a = pr.agents[+el.dataset.agent]; a.status = ORDER[(ORDER.indexOf(a.status) + 1) % 3]; store.saveProject(Object.assign({}, pr)); return; }
     if ((el = t.closest('[data-edit]'))) { e.stopPropagation(); return editModal(el.dataset.edit); }
     if ((el = t.closest('[data-filter]'))) { filter = el.dataset.filter; localStorage.setItem('cc_filter', filter); return render(true); }
     if (t.closest('[data-add]')) return editModal(null);
@@ -342,6 +460,7 @@
   document.addEventListener('keydown', function (e) {
     if (e.target.id === 'msg' && e.key === 'Enter' && !e.shiftKey && !('ontouchstart' in window)) { e.preventDefault(); sendNote(); }
     if (e.key === 'Escape') closeModal();
+    if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('cp-item')) location.hash = '#/p/' + encodeURIComponent(e.target.dataset.open);
   });
   function parseConnectFile(text) {
     var url = '', key = '';
@@ -362,6 +481,8 @@
   }
   function loadPrefill() {
     if (window.CC_PREFILL) { applyPrefill(); return; }
+    /* hosted copies (e.g. GitHub Pages) never ship keys, so don't probe for cc-connect.js there */
+    if (/^https?:$/.test(location.protocol) && !/^(localhost|127\.|\[::1\])/.test(location.hostname)) return;
     var el = document.createElement('script');
     el.src = 'cc-connect.js';
     el.onload = applyPrefill;
